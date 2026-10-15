@@ -1,7 +1,55 @@
-# dsh-st-preset — 真的像 ST 的预设（按窗口）
+# sillytavern-preset-for-dsh
 
-把 SillyTavern 的**聊天补全预设原样**接进 DSH：条目列表、📌 分区、🔀 多选一、逐条开关，
-**每个窗口（Session）各管一份**，并且因为是在系统提示词的组装阶段注入，**工具调用那一轮同样带着预设**。
+把 **SillyTavern 的聊天补全预设**原样搬进 **DeepSeek Harness（DSH）**，并且按**窗口（Session）**管开关。
+不是"把预设拍平成一坨系统提示词"，而是保留 ST 的条目层级、逐条开关、🔀 多选一互斥，还有就地改正文。
+
+## 它解决什么
+
+ST 的预设是一份「条目列表 + 开关状态」：📌 分区、🔀 多选一、🔌 可开关、✏️ 可编辑。
+DSH 原生的 agent preset 是静态配置，没有这套东西；把预设导成一个大字符串又会丢掉全部可调性。
+这个插件把两者接起来：**预设文件是 ST 的，界面是 ST 式的，作用域是 DSH 的窗口。**
+
+## 特性
+
+| 能力 | 说明 |
+|---|---|
+| ST 预设原样读 | `<presetsDir>/*.json`，`prompts` / `prompt_order` 结构不动，ST 导出直接能用 |
+| 面板内导入 / 删除 / 改名 | 手机文件选择器选 JSON 即导入；删除有二次确认；改名只改显示名，不动文件名/id |
+| 逐条开关 + 📌 分区 | 面板按 ST 的分区标题分组，每条一个开关 |
+| 🔀 多选一互斥 | 同组开一个自动关掉兄弟项（按条目名归组） |
+| ✏️ 正文就地编辑 | 每条「改」展开文本框，改的是**本窗口**的覆盖，预设文件不动，可一键还原 |
+| 按窗口隔离 | 开关与正文覆盖都按 Session 存，A 窗口关 NSFW 不影响 B 窗口 |
+| 工具调用轮同样生效 | 注入是 `systemPrompt.section` 的**组装期函数**，每个模型步现算，不是只在首轮 |
+| ST 宏按序展开 | `{{setvar}}` / `{{getvar}}` / `{{trim}}` / `{{//注释}}` 构建期展开；`{{user}}`→玩家、`{{char}}`→角色 |
+| 一行 patch 插拔 | 无需 `install_bundle`（因此不触发 DSHA 原生审阅），删掉那行即卸载 |
+
+## 快速开始
+
+```bash
+# 1) 放插件（Host + Client 两半，纯 JS，无依赖）
+git clone https://github.com/baiyixing12/sillytavern-preset-for-dsh.git /root/dsh-st-preset
+
+# 2) 往 profile 的 cordis.patch.yml 顶层数组插一段（见 insert.patch.yml）
+#    - insert:
+#        - id: st-preset
+#          name: /root/dsh-st-preset/index.js
+#          config:
+#            presetsDir: /root/.dsh/st-presets
+
+# 3) 自测
+node /root/dsh-st-preset/selftest.mjs
+```
+
+装好后刷新 DSH 网页：输入框左侧出现「**预设**」按钮（另有 设置 →「ST 预设」整页），
+导入一个 ST 预设 JSON → 选它 → 逐条开关即可。
+
+## 已知不做
+
+- **13 条正则显示脚本**（思维链 / 时空栏 / 正文去壳 / 剧情选项）：那是 ST 的输出后处理层，
+  DSH 的对话渲染归 Conversation 层所有，没有搬。所以"正文好看程度"和 ST 仍不一致。
+- **运行时变量回写**：模型 `<UpdateVariable>` → 下轮 `{{getvar}}` 这条链没有引擎，
+  「世界图谱 / 记忆链 / 剧情大总结」这类槽位不会随对话累积（构建期展开仍然正确）。
+- 采样参数（temperature / top_p / repetition_penalty…）不属于预设，仍由 DSH 模型设置管。
 
 ## 装在哪
 
@@ -72,7 +120,7 @@ export https_proxy=http://127.0.0.1:7890 http_proxy=http://127.0.0.1:7890
 git -C /root/dsh-st-preset push
 ```
 
-`origin` = `https://github.com/baiyixing12/dsh-st-preset.git`（private），分支 `main`。
+`origin` = `https://github.com/baiyixing12/sillytavern-preset-for-dsh.git`（private），分支 `main`。
 令牌只以 `-c http.extraheader=AUTHORIZATION: basic …` 单次传入，**不落 `.git/config`、不写进 remote URL**。
 
 ## 自己导入 / 更换（不需要经过 agent）
