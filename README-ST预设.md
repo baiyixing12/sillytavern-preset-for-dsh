@@ -62,3 +62,15 @@ node /root/dsh-st-preset/selftest.mjs
 
 覆盖：预设发现 / 未选不注入 / 条目与分区解析 / 默认开关来自 ST 快照 / 宏全展开 /
 关条目后正文变短 / 窗口隔离 / 多选一互斥 / 还原。当前 17 项全通过。
+
+## 推到 GitHub（这台手机的坑）
+
+本机 DNS 把 `github.com` / `api.github.com` 污染到假 IP，直连 TLS 被重置，必须借手机上的代理：
+
+```bash
+export https_proxy=http://127.0.0.1:7890 http_proxy=http://127.0.0.1:7890
+git -C /root/dsh-st-preset push
+```
+
+`origin` = `https://github.com/baiyixing12/dsh-st-preset.git`（private），分支 `main`。
+令牌只以 `-c http.extraheader=AUTHORIZATION: basic …` 单次传入，**不落 `.git/config`、不写进 remote URL**。
