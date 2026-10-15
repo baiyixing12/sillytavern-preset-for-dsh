@@ -1,0 +1,21 @@
+{
+  "name": "dsh-st-preset",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SillyTavern 式预设：按窗口（Session）开关 ST 预设条目，注入系统提示词",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "immediately": false,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
+  }
+}

@@ -1,0 +1,7 @@
+# dsh-st-preset：ST 式预设（按窗口）。插到 profile 的 cordis.patch.yml 顶层数组里即可生效；
+# 删除本段即卸载。不需要 install_bundle，也没有新包。
+- insert:
+    - id: st-preset
+      name: /root/dsh-st-preset/index.js
+      config:
+        presetsDir: /root/.dsh/st-presets
