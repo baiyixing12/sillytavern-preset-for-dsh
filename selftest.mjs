@@ -4,7 +4,7 @@
  * 用法：node /root/dsh-st-preset/selftest.mjs
  */
 import { apply } from './index.js';
-import { existsSync, mkdirSync, rmSync, copyFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, copyFileSync, readFileSync } from 'node:fs';
 
 // 独立临时目录，避免污染真实 state.json
 const DIR = '/tmp/st-preset-selftest';
@@ -128,6 +128,32 @@ check('删除只动目标文件', existsSync(`${DIR}/智脑-Z（10.1）.json`));
 const removeTraversal = await call({ action: 'delete', sessionId: 'session-test-1', presetId: '../智脑-Z（10.1）' });
 check('删除拒绝非法 id', typeof removeTraversal.error === 'string', removeTraversal.error);
 rmSync(`${DIR}/evil.json`, { force: true });
+
+
+// ---- 条目正文就地编辑 / 预设改名 ----
+const zhinaoId = '智脑-Z（10.1）';
+await call({ action: 'setPreset', sessionId: 'session-test-1', presetId: zhinaoId });
+const before = await call({ action: 'entryText', sessionId: 'session-test-1', identifier: 'main' });
+check('entryText 给出原文', before.edited === false && before.text.length > 50, `${before.text.length} 字`);
+
+const edited = await call({ action: 'setText', sessionId: 'session-test-1', identifier: 'main', text: 'OVERRIDE-正文' });
+check('setText 后标记已改', edited.detail.entries.find((e) => e.identifier === 'main').edited === true);
+check('setText 后正文被替换', sections[0].text().includes('OVERRIDE-正文'));
+check('编辑只作用于本窗口', (await call({ action: 'state', sessionId: 'session-other' })).presetId === null);
+check('entryText 回读覆盖内容', (await call({ action: 'entryText', sessionId: 'session-test-1', identifier: 'main' })).text === 'OVERRIDE-正文');
+
+const back = await call({ action: 'setText', sessionId: 'session-test-1', identifier: 'main', text: null });
+check('可还原成原文', back.detail.entries.find((e) => e.identifier === 'main').edited === false
+  && !sections[0].text().includes('OVERRIDE-正文'));
+
+const renamed = await call({ action: 'rename', sessionId: 'session-test-1', presetId: zhinaoId, name: '智脑·改名测试' });
+check('改名后下拉名变化', renamed.presets.find((p) => p.id === zhinaoId).name === '智脑·改名测试');
+check('改名写回预设文件', JSON.parse(readFileSync(`${DIR}/${zhinaoId}.json`, 'utf8')).name === '智脑·改名测试');
+check('改名不动 id/文件名', existsSync(`${DIR}/${zhinaoId}.json`));
+await call({ action: 'rename', sessionId: 'session-test-1', presetId: zhinaoId, name: '智脑-Z（10.1）' });
+check('改名可逆', (await call({ action: 'state', sessionId: 'session-test-1' })).presets.find((p) => p.id === zhinaoId).name === '智脑-Z（10.1）');
+check('改名拒绝非法 id', Boolean((await call({ action: 'rename', sessionId: 'session-test-1', presetId: '../x', name: 'x' })).error));
+check('改名拒绝空名', Boolean((await call({ action: 'rename', sessionId: 'session-test-1', presetId: zhinaoId, name: '   ' })).error));
 
 console.log(fail.length === 0 ? '\n全部通过' : `\n失败 ${fail.length} 项：${fail.join(', ')}`);
 process.exit(fail.length === 0 ? 0 : 1);

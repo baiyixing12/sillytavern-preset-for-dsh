@@ -223,6 +223,13 @@ export function apply(ctx, config) {
   const looksLikeStPreset = (value) => Boolean(value) && typeof value === 'object'
     && Array.isArray(value.prompts) && value.prompts.length > 0;
 
+  /** 只接受「预设目录里的一个文件名」，不接受任何路径成分。 */
+  const safeId = (value) => {
+    const id = String(value || '');
+    if (!id || id.includes('/') || id.includes('\\') || id.startsWith('.')) return null;
+    return id.replace(/[\u0000-\u001f]/g, '') || null;
+  };
+
   const handle = (payload) => {
     const action = String(payload && payload.action || '');
     const sessionId = payload && payload.sessionId;
@@ -276,10 +283,8 @@ export function apply(ctx, config) {
       return { ...snapshot(sessionId), imported: presetId };
     }
     if (action === 'delete') {
-      const presetId = String(payload.presetId || '');
-      if (!presetId || presetId.includes('/') || presetId.includes('\\') || presetId.startsWith('.')) {
-        return { error: '非法的预设 id' };
-      }
+      const presetId = safeId(payload.presetId);
+      if (!presetId) return { error: '非法的预设 id' };
       const target = join(presetsDir, `${presetId}.json`);
       if (!existsSync(target)) return { error: `找不到预设「${presetId}」` };
       unlinkSync(target);
@@ -287,6 +292,48 @@ export function apply(ctx, config) {
       saveState();
       loadPresets();
       return snapshot(sessionId);
+    }
+    if (action === 'entryText') {
+      const win = windowState(sessionId);
+      const preset = presets.get(win.presetId);
+      if (!preset) return { error: '本窗口还没有选预设' };
+      const prompt = preset.prompts.get(String(payload.identifier));
+      if (!prompt) return { error: '找不到该条目' };
+      const override = win.text && win.text[String(payload.identifier)];
+      const original = String(prompt.content || '');
+      return {
+        identifier: String(payload.identifier),
+        name: String(prompt.name || payload.identifier),
+        text: typeof override === 'string' ? override : original,
+        original,
+        edited: typeof override === 'string',
+      };
+    }
+    if (action === 'setText') {
+      const win = windowState(sessionId);
+      const preset = presets.get(win.presetId);
+      if (!preset) return { error: '本窗口还没有选预设' };
+      const identifier = String(payload.identifier);
+      if (!preset.prompts.has(identifier)) return { error: '找不到该条目' };
+      win.text ||= {};
+      if (payload.text === null || payload.text === undefined) delete win.text[identifier];
+      else win.text[identifier] = String(payload.text);
+      saveState();
+      return snapshot(sessionId);
+    }
+    if (action === 'rename') {
+      const presetId = safeId(payload.presetId);
+      if (!presetId) return { error: '非法的预设 id' };
+      const target = join(presetsDir, `${presetId}.json`);
+      if (!existsSync(target)) return { error: `找不到预设「${presetId}」` };
+      const name = String(payload.name || '').trim().slice(0, 80);
+      if (!name) return { error: '名字不能为空' };
+      const raw = readJson(target);
+      if (!raw || typeof raw !== 'object') return { error: '预设文件读不出来' };
+      raw.name = name;
+      writeFileSync(target, `${JSON.stringify(raw, null, 4)}\n`, { mode: 0o600 });
+      loadPresets();
+      return { ...snapshot(sessionId), renamed: presetId };
     }
     if (action === 'clearOverrides') {
       const win = windowState(sessionId);

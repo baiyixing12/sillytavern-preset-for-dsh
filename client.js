@@ -54,6 +54,13 @@ window.__ModuleLoader__.load({
       },
       note: { marginTop: 8, fontSize: 11, color: token.dim },
       error: { fontSize: 11, color: '#ff8080', marginTop: 8 },
+      editor: { padding: '6px 4px 8px' },
+      textarea: {
+        width: '100%', boxSizing: 'border-box', minHeight: 140, resize: 'vertical',
+        fontSize: 12, lineHeight: 1.5, fontFamily: 'inherit',
+        color: token.text, background: token.layer,
+        border: `1px solid ${token.border}`, borderRadius: 8, padding: 8,
+      },
     };
 
     async function api(payload) {
@@ -99,6 +106,7 @@ window.__ModuleLoader__.load({
       const [data, setData] = React.useState(null);
       const [error, setError] = React.useState('');
       const [busy, setBusy] = React.useState(false);
+      const [editing, setEditing] = React.useState(null);
       const fileRef = React.useRef(null);
 
       const send = React.useCallback(async (payload) => {
@@ -148,6 +156,36 @@ window.__ModuleLoader__.load({
         await send({ action: 'delete', presetId: data.presetId });
       };
 
+      const renamePreset = async () => {
+        if (!data || !data.presetId) return;
+        const current = ((data.presets || []).find((preset) => preset.id === data.presetId) || {}).name || data.presetId;
+        const name = window.prompt('预设显示名（文件名/id 不变）', current);
+        if (name === null) return;
+        const trimmed = name.trim();
+        if (!trimmed || trimmed === current) return;
+        await send({ action: 'rename', presetId: data.presetId, name: trimmed });
+      };
+
+      const openEditor = async (entry) => {
+        setBusy(true);
+        try {
+          const sid = currentSessionId();
+          const result = await api({ action: 'entryText', sessionId: sid, identifier: entry.identifier });
+          if (result && result.error) throw new Error(result.error);
+          setEditing(result);
+          setError('');
+        } catch (cause) {
+          setError(String((cause && cause.message) || cause));
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      const writeText = async (text) => {
+        const result = await send({ action: 'setText', identifier: editing.identifier, text });
+        if (result) setEditing(null);
+      };
+
       const entries = (data && data.detail && data.detail.entries) || [];
       const shell = inline
         ? { ...styles.panel, position: 'static', right: 'auto', bottom: 'auto', width: '100%', maxHeight: 'none', boxShadow: 'none', margin: '0 0 12px' }
@@ -165,6 +203,10 @@ window.__ModuleLoader__.load({
               h('option', { key: preset.id, value: preset.id }, preset.name)),
           ),
           h('button', { style: styles.ghost, onClick: pickFile, title: '导入 ST 预设 JSON' }, '导入'),
+          h('button', {
+            style: styles.ghost, onClick: renamePreset, disabled: !(data && data.presetId),
+            title: '改预设显示名（文件名/id 不变）',
+          }, '改名'),
           h('button', {
             style: styles.ghost, onClick: removePreset, disabled: !(data && data.presetId),
             title: '删除当前预设文件',
@@ -205,7 +247,33 @@ window.__ModuleLoader__.load({
                     ),
                     entry.group ? h('span', { style: styles.chip }, '多选一') : null,
                     entry.role !== 'system' ? h('span', { style: styles.chip }, entry.role) : null,
+                    h('button', {
+                      style: { ...styles.ghost, height: 22, padding: '0 6px', fontSize: 11 },
+                      title: '编辑该条目正文（只影响本窗口）',
+                      onClick: () => (editing && editing.identifier === entry.identifier
+                        ? setEditing(null)
+                        : openEditor(entry)),
+                    }, editing && editing.identifier === entry.identifier ? '收起' : '改'),
                   ),
+                  editing && editing.identifier === entry.identifier
+                    ? h('div', { style: styles.editor },
+                        h('textarea', {
+                          style: styles.textarea,
+                          rows: 10,
+                          value: editing.text,
+                          onChange: (event) => setEditing({ ...editing, text: event.target.value }),
+                        }),
+                        h('div', { style: { display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' } },
+                          h('button', { style: styles.ghost, onClick: () => writeText(editing.text) }, '存到本窗口'),
+                          h('button', {
+                            style: styles.ghost, disabled: !editing.edited,
+                            onClick: () => writeText(null),
+                          }, '还原原文'),
+                          h('button', { style: styles.ghost, onClick: () => setEditing(null) }, '取消'),
+                          h('span', { style: { ...styles.small, alignSelf: 'center' } }, `${editing.text.length} 字`),
+                        ),
+                      )
+                    : null,
                 );
               }),
               h('div', { style: { display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' } },
