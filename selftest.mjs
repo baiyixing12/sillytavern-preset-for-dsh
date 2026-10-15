@@ -4,7 +4,7 @@
  * 用法：node /root/dsh-st-preset/selftest.mjs
  */
 import { apply } from './index.js';
-import { mkdirSync, rmSync, copyFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, copyFileSync } from 'node:fs';
 
 // 独立临时目录，避免污染真实 state.json
 const DIR = '/tmp/st-preset-selftest';
@@ -93,6 +93,41 @@ if (exclusive) {
 
 const restored = await call({ action: 'clearOverrides', sessionId: 'session-test-1' });
 check('还原后回到 ST 默认', restored.detail.entries.filter((e) => e.enabled).length === defaultOn);
+
+
+// ---- 导入 / 删除（自由更换预设）----
+const mini = JSON.stringify({
+  name: '迷你测试预设',
+  prompts: [{ identifier: 'a', name: 'A', content: 'AAA {{setvar::x::B}}', role: 'system' },
+            { identifier: 'b', name: 'B', content: '{{getvar::x}}', role: 'system' }],
+  prompt_order: [{ order: [{ enabled: true, identifier: 'a' }, { enabled: true, identifier: 'b' }] }],
+});
+const imported = await call({ action: 'import', sessionId: 'session-test-1', fileName: '迷你测试预设.json', text: mini });
+check('导入后出现在列表', imported.presets.some((p) => p.id === '迷你测试预设'), JSON.stringify(imported.presets.map((p) => p.id)));
+check('导入后自动选中', imported.presetId === '迷你测试预设' && imported.imported === '迷你测试预设');
+check('导入后正文来自新预设', sections[0].text() === 'AAA\n\nB', JSON.stringify(sections[0].text()));
+check('文件真的落盘', existsSync(`${DIR}/迷你测试预设.json`));
+
+const again = await call({ action: 'import', sessionId: 'session-test-1', fileName: '迷你测试预设.json', text: mini });
+check('重复导入返回冲突', again.conflict === '迷你测试预设');
+const forced = await call({ action: 'import', sessionId: 'session-test-1', fileName: '迷你测试预设.json', text: mini, overwrite: true });
+check('确认后可覆盖', forced.imported === '迷你测试预设' && !forced.conflict);
+
+const bad = await call({ action: 'import', sessionId: 'session-test-1', fileName: 'x.json', text: '{"hello":1}' });
+check('非 ST 预设被拒', typeof bad.error === 'string', bad.error);
+const traversal = await call({ action: 'import', sessionId: 'session-test-1', fileName: '../../evil.json', text: mini });
+check('路径穿越被净化', traversal.imported === 'evil' && existsSync(`${DIR}/evil.json`) && !existsSync('/tmp/evil.json'),
+  traversal.imported);
+
+const removed = await call({ action: 'delete', sessionId: 'session-test-1', presetId: '迷你测试预设' });
+check('删除后从列表消失', !removed.presets.some((p) => p.id === '迷你测试预设'));
+check('删的不是当前选中，窗口不动', removed.presetId === 'evil', `presetId=${JSON.stringify(removed.presetId)}`);
+const removedCurrent = await call({ action: 'delete', sessionId: 'session-test-1', presetId: 'evil' });
+check('删掉当前选中后回落未选', removedCurrent.presetId === null, `presetId=${JSON.stringify(removedCurrent.presetId)}`);
+check('删除只动目标文件', existsSync(`${DIR}/智脑-Z（10.1）.json`));
+const removeTraversal = await call({ action: 'delete', sessionId: 'session-test-1', presetId: '../智脑-Z（10.1）' });
+check('删除拒绝非法 id', typeof removeTraversal.error === 'string', removeTraversal.error);
+rmSync(`${DIR}/evil.json`, { force: true });
 
 console.log(fail.length === 0 ? '\n全部通过' : `\n失败 ${fail.length} 项：${fail.join(', ')}`);
 process.exit(fail.length === 0 ? 0 : 1);

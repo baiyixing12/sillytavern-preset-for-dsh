@@ -1,6 +1,7 @@
 /**
- * dsh-st-preset — Client 半：输入框左侧一个「预设」按钮，展开 ST 式条目面板。
- * 所有数据都走 POST /api/st-preset（Host 的精确 Fetch 路由，沿用 /api 鉴权）。
+ * dsh-st-preset — Client 半。
+ * 输入框左侧「预设」按钮 + 设置页「ST 预设」：选预设、逐条开关、导入/删除预设文件。
+ * 数据全部走 POST /api/st-preset（Host 精确 Fetch 路由，沿用 /api 鉴权）。
  */
 window.__ModuleLoader__.load({
   id: 'dsh-st-preset',
@@ -14,7 +15,6 @@ window.__ModuleLoader__.load({
     const token = {
       panelBg: 'var(--dsw-alias-bg-overlay, rgba(30,30,33,0.98))',
       layer: 'var(--dsw-alias-bg-layer-2, rgba(127,127,127,0.10))',
-      hover: 'var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,0.16))',
       border: 'var(--dsw-alias-border-l2, rgba(127,127,127,0.35))',
       text: 'var(--dsw-alias-label-primary, inherit)',
       dim: 'var(--dsw-alias-label-caption, rgba(127,127,127,1))',
@@ -41,9 +41,9 @@ window.__ModuleLoader__.load({
         fontSize: 10, padding: '1px 5px', borderRadius: 999,
         border: `1px solid ${token.border}`, color: token.dim, flex: '0 0 auto',
       },
-      head: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 },
+      head: { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, flexWrap: 'wrap' },
       select: {
-        flex: '1 1 auto', minWidth: 0, height: 28, borderRadius: 8, fontSize: 12,
+        flex: '1 1 130px', minWidth: 0, height: 28, borderRadius: 8, fontSize: 12,
         color: token.text, background: token.layer, border: `1px solid ${token.border}`,
       },
       small: { fontSize: 11, color: token.dim },
@@ -53,6 +53,7 @@ window.__ModuleLoader__.load({
         border: `1px solid ${token.border}`, borderRadius: 8,
       },
       note: { marginTop: 8, fontSize: 11, color: token.dim },
+      error: { fontSize: 11, color: '#ff8080', marginTop: 8 },
     };
 
     async function api(payload) {
@@ -98,49 +99,83 @@ window.__ModuleLoader__.load({
       const [data, setData] = React.useState(null);
       const [error, setError] = React.useState('');
       const [busy, setBusy] = React.useState(false);
+      const fileRef = React.useRef(null);
 
-      const load = React.useCallback(async (action, extra) => {
+      const send = React.useCallback(async (payload) => {
         setBusy(true);
         try {
           const sid = currentSessionId();
           setSessionId(sid);
-          const next = await api({ action: action || 'state', sessionId: sid, ...(extra || {}) });
+          const next = await api({ sessionId: sid, ...payload });
           if (next && next.error) throw new Error(next.error);
           setData(next);
           setError('');
+          return next;
         } catch (cause) {
           setError(String((cause && cause.message) || cause));
+          return null;
         } finally {
           setBusy(false);
         }
       }, []);
 
-      React.useEffect(() => { load('state'); }, [load]);
+      React.useEffect(() => { send({ action: 'state' }); }, [send]);
       React.useEffect(() => {
-        const onKey = (event) => { if (event.key === 'Escape') onClose(); };
+        const onKey = (event) => { if (event.key === 'Escape' && !inline) onClose(); };
         document.addEventListener('keydown', onKey);
         return () => document.removeEventListener('keydown', onKey);
-      }, [onClose]);
+      }, [onClose, inline]);
+
+      const pickFile = () => fileRef.current && fileRef.current.click();
+
+      const importFile = async (event) => {
+        const input = event.target;
+        const file = input.files && input.files[0];
+        input.value = '';
+        if (!file) return;
+        let text;
+        try { text = await file.text(); } catch { setError('读取文件失败'); return; }
+        const result = await send({ action: 'import', fileName: file.name, text });
+        if (result && result.conflict) {
+          if (!window.confirm(`${result.message || result.conflict}\n覆盖后原文件内容会丢失。`)) return;
+          await send({ action: 'import', fileName: file.name, text, overwrite: true });
+        }
+      };
+
+      const removePreset = async () => {
+        if (!data || !data.presetId) return;
+        if (!window.confirm(`删除预设「${data.presetId}」？文件会从预设目录移除。`)) return;
+        await send({ action: 'delete', presetId: data.presetId });
+      };
 
       const entries = (data && data.detail && data.detail.entries) || [];
-
       const shell = inline
         ? { ...styles.panel, position: 'static', right: 'auto', bottom: 'auto', width: '100%', maxHeight: 'none', boxShadow: 'none', margin: '0 0 12px' }
         : styles.panel;
+
       return h('div', { style: shell, role: inline ? undefined : 'dialog', 'aria-label': 'ST 预设' },
         h('div', { style: styles.head },
           h('select', {
             style: styles.select,
             value: (data && data.presetId) || '',
-            onChange: (event) => load('setPreset', { presetId: event.target.value || null }),
+            onChange: (event) => send({ action: 'setPreset', presetId: event.target.value || null }),
           },
             h('option', { value: '' }, '（本窗口不使用预设）'),
             ...((data && data.presets) || []).map((preset) =>
               h('option', { key: preset.id, value: preset.id }, preset.name)),
           ),
-          h('button', { style: styles.ghost, onClick: () => load('reload'), title: '重新扫描预设目录' }, '重载'),
+          h('button', { style: styles.ghost, onClick: pickFile, title: '导入 ST 预设 JSON' }, '导入'),
+          h('button', {
+            style: styles.ghost, onClick: removePreset, disabled: !(data && data.presetId),
+            title: '删除当前预设文件',
+          }, '删除'),
+          h('button', { style: styles.ghost, onClick: () => send({ action: 'reload' }), title: '重新扫描预设目录' }, '重载'),
           inline ? null : h('button', { style: styles.ghost, onClick: onClose, title: '关闭' }, '×'),
         ),
+        h('input', {
+          ref: fileRef, type: 'file', accept: '.json,application/json',
+          style: { display: 'none' }, onChange: importFile,
+        }),
         data && data.presetId
           ? h('div', null,
               h('div', { style: styles.small },
@@ -157,7 +192,8 @@ window.__ModuleLoader__.load({
                     h(Toggle, {
                       checked: entry.enabled,
                       title: entry.enabled ? '关闭该条目' : '开启该条目',
-                      onClick: () => load('toggle', {
+                      onClick: () => send({
+                        action: 'toggle',
                         identifier: entry.identifier,
                         enabled: !entry.enabled,
                         ...exclusive,
@@ -172,18 +208,23 @@ window.__ModuleLoader__.load({
                   ),
                 );
               }),
-              h('div', { style: { display: 'flex', gap: 8, marginTop: 10 } },
-                h('button', { style: styles.ghost, onClick: () => load('clearOverrides') }, '还原本窗口改动'),
+              h('div', { style: { display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' } },
+                h('button', { style: styles.ghost, onClick: () => send({ action: 'clearOverrides' }) }, '还原本窗口改动'),
                 h('span', { style: { ...styles.small, alignSelf: 'center' } },
                   sessionId ? `仅窗口 ${String(sessionId).slice(0, 8)}` : '未识别窗口',
                 ),
               ),
               h('div', { style: styles.note },
-                '开关按窗口存；改动在下一次模型步（含工具调用轮）生效。',
+                '开关按窗口存；改动在下一次模型步（含工具调用轮）生效。预设目录：',
+                h('code', null, (data && data.presetsDir) || '/root/.dsh/st-presets'),
               ),
             )
-          : h('div', { style: styles.small }, '先选一个预设；预设文件放在 /root/.dsh/st-presets/*.json。'),
-        error ? h('div', { style: { ...styles.small, color: 'var(--dsw-alias-label-primary-bluish, #ff8080)', marginTop: 8 } }, `接口出错：${error}`) : null,
+          : h('div', { style: styles.small },
+              '点「导入」从手机里选一个 ST 预设 JSON；也可以把文件放进 ',
+              h('code', null, (data && data.presetsDir) || '/root/.dsh/st-presets'),
+              ' 后点「重载」。',
+            ),
+        error ? h('div', { style: styles.error }, `接口出错：${error}`) : null,
         busy ? h('div', { style: styles.small }, '…') : null,
       );
     }

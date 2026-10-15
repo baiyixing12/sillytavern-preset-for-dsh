@@ -8,7 +8,7 @@
  * - 面板数据：POST /api/st-preset（走 host connection 的精确 Fetch 路由，受 /api 鉴权保护）
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const ROUTE = '/api/st-preset';
@@ -212,6 +212,17 @@ export function apply(ctx, config) {
     };
   };
 
+  /** 用预设自己的 name / 上传文件名推导安全 id；杜绝路径穿越。 */
+  const presetIdOf = (fileName, parsed) => {
+    const base = String(fileName || (parsed && parsed.name) || '').replace(/\\/g, '/').split('/').pop() || '';
+    const raw = base.replace(/\.json$/i, '').trim() || String((parsed && parsed.name) || '').trim() || 'preset';
+    const safe = raw.replace(/[\u0000-\u001f/\\:*?"<>|]/g, '_').replace(/^\.+/, '').trim().slice(0, 60);
+    return safe || 'preset';
+  };
+
+  const looksLikeStPreset = (value) => Boolean(value) && typeof value === 'object'
+    && Array.isArray(value.prompts) && value.prompts.length > 0;
+
   const handle = (payload) => {
     const action = String(payload && payload.action || '');
     const sessionId = payload && payload.sessionId;
@@ -242,6 +253,39 @@ export function apply(ctx, config) {
         }
       }
       saveState();
+      return snapshot(sessionId);
+    }
+    if (action === 'import') {
+      let parsed;
+      try {
+        const raw = typeof payload.text === 'string' ? payload.text.replace(/^\uFEFF/, '') : payload.json;
+        parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      } catch {
+        return { error: '不是合法 JSON' };
+      }
+      if (!looksLikeStPreset(parsed)) return { error: '不像 ST 聊天补全预设（缺 prompts 数组）' };
+      const presetId = presetIdOf(payload.fileName, parsed);
+      const target = join(presetsDir, `${presetId}.json`);
+      if (existsSync(target) && payload.overwrite !== true) {
+        return { conflict: presetId, message: `已存在「${presetId}」，要覆盖吗？` };
+      }
+      writeFileSync(target, `${JSON.stringify(parsed, null, 4)}\n`, { mode: 0o600 });
+      loadPresets();
+      const win = windowState(sessionId);
+      if (payload.select !== false) { win.presetId = presetId; win.enabled = {}; win.text = {}; saveState(); }
+      return { ...snapshot(sessionId), imported: presetId };
+    }
+    if (action === 'delete') {
+      const presetId = String(payload.presetId || '');
+      if (!presetId || presetId.includes('/') || presetId.includes('\\') || presetId.startsWith('.')) {
+        return { error: '非法的预设 id' };
+      }
+      const target = join(presetsDir, `${presetId}.json`);
+      if (!existsSync(target)) return { error: `找不到预设「${presetId}」` };
+      unlinkSync(target);
+      for (const win of Object.values(state.sessions)) if (win.presetId === presetId) win.presetId = null;
+      saveState();
+      loadPresets();
       return snapshot(sessionId);
     }
     if (action === 'clearOverrides') {
