@@ -230,3 +230,10 @@ git -C /root/dsh-st-preset push
 
 顶栏「**改名**」→ 改的是预设的**显示名**（写进 JSON 的 `name` 字段，下拉框里显示它）。
 文件名 / id 不变，因此窗口状态、`{{getvar}}` 之类都不受影响；空名和非法 id 会被拒。
+
+## 两条安装路
+
+- **正规安装**：`dsh plugin --profile <名> add <仓库目录>` 或 DSHA「插件 → 插件管理 → 本地目录」——
+  本仓库已声明 `dsh.bundle.patch`，装完自动挂载。
+- **自由插入**（本机用的）：不用装包，直接把 `insert.patch.yml` 那段写进 profile 的 `cordis.patch.yml`，
+  `name` 用插件目录的绝对路径。
